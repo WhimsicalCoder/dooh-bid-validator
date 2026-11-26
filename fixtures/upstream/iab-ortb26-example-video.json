@@ -1,0 +1,81 @@
+{
+  "id": "873465983764395",
+  "at": 1,
+  "imp": [
+    {
+      "id": "123456",
+      "secure": 1,
+      "exp": 720,
+      "bidfloor": 4.8,
+      "bidfloorcur": "GBP",
+      "video": {
+        "boxingallowed": 1,
+        "w": 960,
+        "h": 480,
+        "maxduration": 20,
+        "minduration": 20,
+        "mimes": [
+          "video/jpeg",
+          "video/mp4",
+          "video/mov"
+        ]
+      },
+      "pmp": {
+        "private_auction": 1,
+        "deals": [
+          {
+            "id": "V123",
+            "at": 1,
+            "bidfloor": 4.5
+          }
+        ]
+      },
+      "dt": 1647010095,
+      "qty": {
+        "multiplier": 14.2,
+        "sourcetype": 0,
+        "vendor": "route.org.uk"
+      }
+    }
+  ],
+  "device": {
+    "geo": {
+      "lat": 51.51112,
+      "long": -0.09043,
+      "lastfix": 0
+    },
+    "devicetype": 8,
+    "w": 960,
+    "h": 480,
+    "ppi": 3,
+    "ifa": "1234928801",
+    "ifa_type": "ppid",
+    "eids": [
+      {
+        "source": "oohspace.co.uk",
+        "uids": [
+          {
+            "atype": 501,
+            "id": "1234928801"
+          }
+        ]
+      }
+    ]
+  },
+  "dooh": {
+    "content": {},
+    "id": "1Frame",
+    "keywords": "LargeFormat,CANNON STREET STN,CANNON STREET,MAIN CONCOURSE",
+    "name": "Transvision",
+    "publisher": {
+      "id": "VJCDUK",
+      "name": "viooh"
+    },
+    "domain": "viooh.com",
+    "venuetax": 1,
+    "venuetypeid": 10602
+  },
+  "cur": [
+    "GBP"
+  ]
+}

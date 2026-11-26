@@ -1,0 +1,49 @@
+{
+  "site-and-dooh": [
+    "STR-003"
+  ],
+  "missing-geo": [
+    "LOC-001"
+  ],
+  "null-island": [
+    "LOC-003"
+  ],
+  "low-precision-geo": [
+    "LOC-004"
+  ],
+  "no-qty": [
+    "AUD-001"
+  ],
+  "zero-multiplier": [
+    "AUD-002"
+  ],
+  "huge-multiplier": [
+    "AUD-003"
+  ],
+  "vendor-missing": [
+    "AUD-006"
+  ],
+  "dt-in-seconds": [
+    "TIM-002"
+  ],
+  "unknown-venue": [
+    "VEN-003"
+  ],
+  "parent-venue-only": [
+    "VEN-004"
+  ],
+  "legacy-field-names": [
+    "LEG-001",
+    "LEG-002",
+    "LEG-003",
+    "VEN-001",
+    "LOC-001"
+  ],
+  "video-no-mimes": [
+    "CRE-003",
+    "CRE-006"
+  ],
+  "wrong-devicetype": [
+    "STR-007"
+  ]
+}

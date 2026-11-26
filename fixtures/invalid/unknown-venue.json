@@ -1,0 +1,76 @@
+{
+  "id": "req-0001",
+  "at": 1,
+  "tmax": 500,
+  "cur": [
+    "USD"
+  ],
+  "imp": [
+    {
+      "id": "1",
+      "bidfloor": 6.0,
+      "bidfloorcur": "USD",
+      "banner": {
+        "w": 1080,
+        "h": 1920,
+        "format": [
+          {
+            "w": 1080,
+            "h": 1920
+          }
+        ],
+        "mimes": [
+          "image/jpeg",
+          "image/png"
+        ]
+      },
+      "dt": 1796137200000,
+      "exp": 3600,
+      "qty": {
+        "multiplier": 12.5,
+        "sourcetype": 1,
+        "vendor": "measurement.example"
+      }
+    }
+  ],
+  "dooh": {
+    "id": "screen-4471",
+    "name": "Woodward Ave Northbound Digital",
+    "venuetype": [
+      "outdoor.billboard"
+    ],
+    "venuetypetax": 1,
+    "publisher": {
+      "id": "pub-88",
+      "name": "Example Outdoor Media",
+      "domain": "example-outdoor.com"
+    },
+    "domain": "example-outdoor.com"
+  },
+  "device": {
+    "devicetype": 8,
+    "w": 1080,
+    "h": 1920,
+    "ifa": "screen-4471",
+    "ifa_type": "ppid",
+    "geo": {
+      "lat": 42.48721,
+      "lon": -83.03312,
+      "type": 3,
+      "country": "USA"
+    }
+  },
+  "source": {
+    "schain": {
+      "complete": 1,
+      "ver": "1.0",
+      "nodes": [
+        {
+          "asi": "ssp.example",
+          "sid": "pub-88",
+          "hp": 1
+        }
+      ]
+    }
+  }
+}

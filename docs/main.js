@@ -52,6 +52,10 @@ var decimals = (n) => {
   const i = s.indexOf(".");
   return i === -1 ? 0 : s.length - i - 1;
 };
+function unwrap(input2) {
+  if (isObj(input2) && isObj(input2.mockBidRequest)) return input2.mockBidRequest;
+  return input2;
+}
 
 // src/rules/audience.ts
 var SOURCE_TYPES = {
@@ -266,7 +270,7 @@ function legacy({ req, add }) {
 }
 
 // src/rules/location.ts
-function location({ req, add }) {
+function location2({ req, add }) {
   const geo = req.device?.geo;
   if (!isObj(geo)) {
     add({
@@ -756,18 +760,293 @@ function venue({ req, add }) {
   }
 }
 
+// src/screens.ts
+var VENUE_BY_ID = new Map(OPENOOH_1_1.map((v) => [String(v.id), v.name]));
+var get = (obj, path) => path.split(".").reduce((o, k) => o == null ? void 0 : o[k], obj);
+var median = (xs) => {
+  const s = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+};
+function haversineM(lat1, lon1, lat2, lon2) {
+  const R = 63710088e-1;
+  const toRad = (d) => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+var tokens = (s) => new Set(s.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length > 1));
+function nameSimilarity(a, b) {
+  if (!a || !b) return 0;
+  const A = tokens(a);
+  const B = tokens(b);
+  if (A.size === 0 || B.size === 0) return 0;
+  let inter = 0;
+  for (const t of A) if (B.has(t)) inter++;
+  return inter / (A.size + B.size - inter);
+}
+var normDomain = (d) => d ? d.toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "") : void 0;
+function venueOf(dooh) {
+  const v = Array.isArray(dooh?.venuetype) ? dooh.venuetype[0] : dooh?.venuetypeid ?? dooh?.venuetype;
+  if (v === void 0 || v === null) return void 0;
+  const s = String(v).trim();
+  return VENUE_BY_ID.get(s) ?? s.toLowerCase();
+}
+function readRecord(input2, sspPath) {
+  let req = input2;
+  let ssp;
+  if (isObj(input2) && (isObj(input2.request) || isObj(input2.bidRequest))) {
+    req = input2.request ?? input2.bidRequest;
+    if (isNonEmptyStr(input2.ssp)) ssp = input2.ssp;
+    else if (isNonEmptyStr(input2.exchange)) ssp = input2.exchange;
+  }
+  req = unwrap(req);
+  if (!isObj(req) || !isObj(req.dooh)) return void 0;
+  if (!ssp && sspPath) {
+    const v = get(req, sspPath);
+    if (isNonEmptyStr(v)) ssp = v;
+  }
+  if (!ssp) {
+    const nodes = req.source?.schain?.nodes ?? req.source?.ext?.schain?.nodes;
+    const last = Array.isArray(nodes) ? nodes[nodes.length - 1] : void 0;
+    if (isNonEmptyStr(last?.asi)) ssp = last.asi;
+  }
+  return { req, ssp: (ssp ?? "unknown").toLowerCase() };
+}
+function buildListings(records, opts) {
+  const accs = /* @__PURE__ */ new Map();
+  let skipped = 0;
+  for (const rec of records) {
+    const r = readRecord(rec, opts.sspPath);
+    if (!r) {
+      skipped++;
+      continue;
+    }
+    const { req, ssp } = r;
+    const dooh = req.dooh;
+    const geo = req.device?.geo ?? {};
+    const lat = isNum(geo.lat) ? geo.lat : void 0;
+    const lon = isNum(geo.lon) ? geo.lon : isNum(geo.long) ? geo.long : void 0;
+    const w = isNum(req.device?.w) ? req.device.w : void 0;
+    const h = isNum(req.device?.h) ? req.device.h : void 0;
+    const screenId = isNonEmptyStr(dooh.id) && dooh.id || isNonEmptyStr(req.device?.ifa) && req.device.ifa || isNonEmptyStr(dooh.name) && dooh.name || (lat !== void 0 && lon !== void 0 ? `${lat.toFixed(5)},${lon.toFixed(5)},${w ?? "?"}x${h ?? "?"}` : "");
+    if (!screenId) {
+      skipped++;
+      continue;
+    }
+    const key = `${ssp}|${screenId}`;
+    let acc = accs.get(key);
+    if (!acc) {
+      acc = {
+        listing: {
+          key,
+          ssp,
+          screenId,
+          name: isNonEmptyStr(dooh.name) ? dooh.name : void 0,
+          publisherId: isNonEmptyStr(dooh.publisher?.id) ? dooh.publisher.id : void 0,
+          publisherDomain: normDomain(dooh.publisher?.domain ?? dooh.domain),
+          lat,
+          lon,
+          w,
+          h,
+          venue: venueOf(dooh),
+          requests: 0
+        },
+        multipliers: [],
+        floors: [],
+        paths: /* @__PURE__ */ new Map()
+      };
+      accs.set(key, acc);
+    }
+    acc.listing.requests++;
+    for (const imp of imps(req)) {
+      if (!isObj(imp)) continue;
+      if (isNum(imp.qty?.multiplier) && imp.qty.multiplier > 0) acc.multipliers.push(imp.qty.multiplier);
+      if (isNum(imp.bidfloor)) {
+        acc.floors.push(imp.bidfloor);
+        acc.currency ?? (acc.currency = isNonEmptyStr(imp.bidfloorcur) ? imp.bidfloorcur : "USD");
+      }
+    }
+    const schain = req.source?.schain ?? req.source?.ext?.schain;
+    const nodes = Array.isArray(schain?.nodes) ? schain.nodes.filter(isObj).map((n) => ({ asi: String(n.asi ?? "?"), sid: String(n.sid ?? "?"), hp: isNum(n.hp) ? n.hp : void 0 })) : [];
+    const route = nodes.length ? nodes.map((n) => n.asi).join(" → ") : "(no schain)";
+    const complete = isNum(schain?.complete) ? schain.complete : void 0;
+    const pk = `${route}|${complete}`;
+    const p = acc.paths.get(pk) ?? { route, nodes, hops: nodes.length, complete, requests: 0 };
+    p.requests++;
+    acc.paths.set(pk, p);
+  }
+  const listings = [...accs.values()].map((a) => {
+    const multiplier = a.multipliers.length ? { min: Math.min(...a.multipliers), median: median(a.multipliers), max: Math.max(...a.multipliers) } : void 0;
+    const floor = a.floors.length ? { median: median(a.floors), currency: a.currency ?? "USD" } : void 0;
+    return {
+      ...a.listing,
+      multiplier,
+      floor,
+      costPerPlay: multiplier && floor ? floor.median / 1e3 * multiplier.median : void 0,
+      paths: [...a.paths.values()].sort((x, y) => y.requests - x.requests)
+    };
+  });
+  return { listings, skipped };
+}
+function matchScore(a, b, radiusM = 50) {
+  if (a.lat === void 0 || a.lon === void 0 || b.lat === void 0 || b.lon === void 0) return void 0;
+  const distanceM = haversineM(a.lat, a.lon, b.lat, b.lon);
+  if (distanceM > radiusM) return void 0;
+  let score = distanceM <= 10 ? 40 : distanceM <= 25 ? 30 : 20;
+  let size = "unknown";
+  if (a.w && a.h && b.w && b.h) {
+    if (a.w === b.w && a.h === b.h) size = "same";
+    else if (Math.abs(a.w / a.h - b.w / b.h) / (b.w / b.h) <= 0.02) size = "same-shape";
+    else return void 0;
+  }
+  score += size === "same" ? 30 : size === "same-shape" ? 15 : 5;
+  let venue2 = "unknown";
+  if (a.venue && b.venue) {
+    if (a.venue === b.venue) venue2 = "same";
+    else if (a.venue.split(".")[0] === b.venue.split(".")[0]) venue2 = "same-parent";
+    else return void 0;
+  }
+  score += venue2 === "same" ? 10 : venue2 === "same-parent" ? 5 : 0;
+  const publisher = !!a.publisherDomain && a.publisherDomain === b.publisherDomain;
+  if (publisher) score += 15;
+  const sim = nameSimilarity(a.name, b.name);
+  const name = sim >= 0.5;
+  if (sim >= 0.3) score += Math.round(sim * 10);
+  return { distanceM, size, venue: venue2, publisher, name, score: Math.min(100, score) };
+}
+function pathRank(l) {
+  const p = l.paths[0];
+  return [p?.complete === 1 ? 0 : 1, p ? p.hops || 99 : 99, l.costPerPlay ?? Number.POSITIVE_INFINITY];
+}
+var cmpRank = (a, b) => {
+  const ra = pathRank(a);
+  const rb = pathRank(b);
+  return ra[0] - rb[0] || ra[1] - rb[1] || ra[2] - rb[2];
+};
+function analyzeScreens(records, opts = {}) {
+  const radiusM = opts.radiusM ?? 50;
+  const minScore = opts.minScore ?? 60;
+  const { listings, skipped } = buildListings(records, opts);
+  const pairs = [];
+  for (let i = 0; i < listings.length; i++) {
+    for (let j = i + 1; j < listings.length; j++) {
+      if (listings[i].ssp === listings[j].ssp) continue;
+      const m = matchScore(listings[i], listings[j], radiusM);
+      if (m && m.score >= minScore) pairs.push({ i, j, m });
+    }
+  }
+  pairs.sort((a, b) => b.m.score - a.m.score || a.m.distanceM - b.m.distanceM);
+  const parent = listings.map((_, i) => i);
+  const ssps = listings.map((l) => /* @__PURE__ */ new Set([l.ssp]));
+  const weakest = /* @__PURE__ */ new Map();
+  const find = (x) => parent[x] === x ? x : parent[x] = find(parent[x]);
+  for (const { i, j, m } of pairs) {
+    const ri = find(i);
+    const rj = find(j);
+    if (ri === rj) continue;
+    if ([...ssps[ri]].some((s) => ssps[rj].has(s))) continue;
+    parent[rj] = ri;
+    for (const s of ssps[rj]) ssps[ri].add(s);
+    const w = [weakest.get(ri), weakest.get(rj), m].filter(Boolean);
+    weakest.set(ri, w.reduce((a, b) => b.score < a.score ? b : a));
+  }
+  const groups = /* @__PURE__ */ new Map();
+  listings.forEach((l, i) => {
+    const r = find(i);
+    groups.set(r, [...groups.get(r) ?? [], l]);
+  });
+  const clusters = [];
+  const singles = [];
+  for (const [root, ls] of groups) {
+    if (ls.length < 2) {
+      singles.push(ls[0]);
+      continue;
+    }
+    ls.sort(cmpRank);
+    const best = ls[0];
+    const w = weakest.get(root);
+    const flags = [];
+    const mults = ls.map((l) => l.multiplier?.median).filter(isNum);
+    if (mults.length >= 2 && Math.min(...mults) > 0) {
+      const ratio = Math.max(...mults) / Math.min(...mults);
+      if (ratio > 1.2) {
+        flags.push(`Audience multiplier differs by ${Math.round((ratio - 1) * 100)}% between SSPs (${Math.min(...mults)} to ${Math.max(...mults)}) for what looks like the same screen.`);
+      }
+    }
+    const floors = ls.map((l) => l.floor?.median).filter(isNum);
+    if (floors.length >= 2 && Math.min(...floors) > 0) {
+      const ratio = Math.max(...floors) / Math.min(...floors);
+      if (ratio > 1.2) flags.push(`Floor CPM differs by ${Math.round((ratio - 1) * 100)}% between SSPs (${Math.min(...floors)} to ${Math.max(...floors)}).`);
+    }
+    const costs = ls.map((l) => l.costPerPlay).filter(isNum);
+    if (costs.length >= 2 && Math.min(...costs) > 0) {
+      const ratio = Math.max(...costs) / Math.min(...costs);
+      if (ratio > 1.2) flags.push(`Cost per play at floor differs by ${Math.round((ratio - 1) * 100)}% depending on which SSP you buy through.`);
+    }
+    const bestHops = best.paths[0]?.hops ?? 0;
+    for (const l of ls.slice(1)) {
+      const h = l.paths[0]?.hops ?? 0;
+      if (h > bestHops && bestHops > 0) flags.push(`${l.ssp} adds ${h - bestHops} extra hop${h - bestHops === 1 ? "" : "s"} compared with ${best.ssp}.`);
+    }
+    clusters.push({
+      id: 0,
+      confidence: w.score >= 85 ? "high" : "medium",
+      listings: ls,
+      weakestMatch: w,
+      bestListing: best.key,
+      flags
+    });
+  }
+  clusters.sort((a, b) => b.listings.length - a.listings.length || (a.confidence === b.confidence ? 0 : a.confidence === "high" ? -1 : 1));
+  clusters.forEach((c, i) => c.id = i + 1);
+  const pathIssues = [];
+  for (const l of listings) {
+    const p = l.paths[0];
+    if (!p || p.hops === 0) pathIssues.push({ listing: l.key, issue: "No supply chain (source.schain) in the request, so the path to the media owner can't be checked." });
+    else {
+      if (p.complete !== 1) pathIssues.push({ listing: l.key, issue: `Supply chain is incomplete (schain.complete = ${p.complete ?? "missing"}). Some sellers in the path are not listed.` });
+      if (p.hops >= 3) pathIssues.push({ listing: l.key, issue: `Long path: ${p.hops} hops (${p.route}).` });
+    }
+  }
+  const inCluster = new Set(clusters.flatMap((c) => c.listings.map((l) => l.key)));
+  const sspNames = [...new Set(listings.map((l) => l.ssp))].sort();
+  const bySsp = sspNames.map((ssp) => {
+    const ls = listings.filter((l) => l.ssp === ssp);
+    const hops = ls.map((l) => l.paths[0]?.hops).filter((h) => isNum(h) && h > 0);
+    return {
+      ssp,
+      listings: ls.length,
+      duplicated: ls.filter((l) => inCluster.has(l.key)).length,
+      avgHops: hops.length ? Math.round(hops.reduce((a, b) => a + b, 0) / hops.length * 10) / 10 : null,
+      incompleteChains: ls.filter((l) => l.paths[0] && l.paths[0].hops > 0 && l.paths[0].complete !== 1).length
+    };
+  });
+  return {
+    summary: {
+      requests: records.length,
+      skipped,
+      listings: listings.length,
+      screens: singles.length + clusters.length,
+      duplicateClusters: clusters.length,
+      duplicateShare: listings.length ? Math.round(inCluster.size / listings.length * 1e3) / 10 : 0,
+      bySsp
+    },
+    clusters,
+    singles,
+    pathIssues
+  };
+}
+
 // src/index.ts
-var RULES = { structure, location, venue, legacy, audience, timing, creative };
+var RULES = { structure, location: location2, venue, legacy, audience, timing, creative };
 var DEFAULTS = {
   maxLeadTimeMs: 2 * 60 * 60 * 1e3,
   pastToleranceMs: 5 * 60 * 1e3,
   maxMultiplier: 1e4
 };
 var SEVERITY_ORDER = { error: 0, warning: 1, info: 2 };
-function unwrap(input2) {
-  if (isObj(input2) && isObj(input2.mockBidRequest)) return input2.mockBidRequest;
-  return input2;
-}
 function validate(input2, opts = {}) {
   const req = unwrap(input2);
   const issues = [];
@@ -818,6 +1097,9 @@ function finish(issues, imps2) {
   const score = Math.max(0, 100 - 25 * counts.error - 8 * counts.warning);
   return { valid: counts.error === 0, score, counts, issues, metrics: { imps: imps2 } };
 }
+
+// fixtures/screens/multi-ssp.jsonl
+var multi_ssp_default = '{"id":"req-0001","imp":[{"id":"1","bidfloor":6,"bidfloorcur":"USD","banner":{"w":1080,"h":1920},"dt":1796137200000,"qty":{"multiplier":12,"sourcetype":1,"vendor":"measurement.example"}}],"dooh":{"id":"A-4471","name":"Woodward Ave Northbound Digital","venuetype":["outdoor.billboards.roadside"],"venuetypetax":1,"publisher":{"id":"example-outdoor.com","domain":"example-outdoor.com"}},"device":{"devicetype":8,"w":1080,"h":1920,"geo":{"lat":42.48721,"lon":-83.03312,"type":3}},"source":{"schain":{"complete":1,"ver":"1.0","nodes":[{"asi":"ssp-a.example","sid":"pub-88","hp":1}]}}}\n{"id":"req-0002","imp":[{"id":"1","bidfloor":6,"bidfloorcur":"USD","banner":{"w":1080,"h":1920},"dt":1796137200000,"qty":{"multiplier":12.5,"sourcetype":1,"vendor":"measurement.example"}}],"dooh":{"id":"A-4471","name":"Woodward Ave Northbound Digital","venuetype":["outdoor.billboards.roadside"],"venuetypetax":1,"publisher":{"id":"example-outdoor.com","domain":"example-outdoor.com"}},"device":{"devicetype":8,"w":1080,"h":1920,"geo":{"lat":42.48721,"lon":-83.03312,"type":3}},"source":{"schain":{"complete":1,"ver":"1.0","nodes":[{"asi":"ssp-a.example","sid":"pub-88","hp":1}]}}}\n{"id":"req-0003","imp":[{"id":"1","bidfloor":6,"bidfloorcur":"USD","banner":{"w":1080,"h":1920},"dt":1796137200000,"qty":{"multiplier":13,"sourcetype":1,"vendor":"measurement.example"}}],"dooh":{"id":"A-4471","name":"Woodward Ave Northbound Digital","venuetype":["outdoor.billboards.roadside"],"venuetypetax":1,"publisher":{"id":"example-outdoor.com","domain":"example-outdoor.com"}},"device":{"devicetype":8,"w":1080,"h":1920,"geo":{"lat":42.48721,"lon":-83.03312,"type":3}},"source":{"schain":{"complete":1,"ver":"1.0","nodes":[{"asi":"ssp-a.example","sid":"pub-88","hp":1}]}}}\n{"id":"req-0004","imp":[{"id":"1","bidfloor":6.5,"bidfloorcur":"USD","banner":{"w":1080,"h":1920},"dt":1796137200000,"qty":{"multiplier":18,"sourcetype":1,"vendor":"measurement.example"}}],"dooh":{"id":"B-99812","name":"Woodward Northbound Digital","venuetype":["30101"],"venuetypetax":1,"publisher":{"id":"example-outdoor.com","domain":"example-outdoor.com"}},"device":{"devicetype":8,"w":1080,"h":1920,"geo":{"lat":42.48725,"lon":-83.03312,"type":3}},"source":{"schain":{"complete":1,"ver":"1.0","nodes":[{"asi":"reseller.example","sid":"r-1","hp":1},{"asi":"ssp-b.example","sid":"rs-77","hp":1}]}}}\n{"id":"req-0005","imp":[{"id":"1","bidfloor":5,"bidfloorcur":"USD","banner":{"w":1080,"h":1920},"dt":1796137200000,"qty":{"multiplier":12.5,"sourcetype":1,"vendor":"measurement.example"}}],"dooh":{"id":"C-0042","name":"Woodward Ave N Digital","venuetype":["outdoor.billboards.roadside"],"venuetypetax":1,"publisher":{"id":"example-outdoor.com","domain":"example-outdoor.com"}},"device":{"devicetype":8,"w":1080,"h":1920,"geo":{"lat":42.48721,"lon":-83.0332,"type":3}},"source":{"schain":{"complete":0,"ver":"1.0","nodes":[{"asi":"ssp-c.example","sid":"c-pub-3","hp":1}]}}}\n{"id":"req-0006","imp":[{"id":"1","bidfloor":6,"bidfloorcur":"USD","banner":{"w":1920,"h":1080},"dt":1796137200000,"qty":{"multiplier":9,"sourcetype":1,"vendor":"measurement.example"}}],"dooh":{"id":"A-4472","name":"Woodward Ave Southbound Digital","venuetype":["outdoor.billboards.roadside"],"venuetypetax":1,"publisher":{"id":"example-outdoor.com","domain":"example-outdoor.com"}},"device":{"devicetype":8,"w":1920,"h":1080,"geo":{"lat":42.48721,"lon":-83.03312,"type":3}},"source":{"schain":{"complete":1,"ver":"1.0","nodes":[{"asi":"ssp-a.example","sid":"pub-88","hp":1}]}}}\n{"id":"req-0007","imp":[{"id":"1","bidfloor":6,"bidfloorcur":"USD","banner":{"w":1920,"h":1080},"dt":1796137200000,"qty":{"multiplier":9,"sourcetype":1,"vendor":"measurement.example"}}],"dooh":{"id":"B-99813","name":"Woodward Southbound Digital","venuetype":["outdoor.billboards.roadside"],"venuetypetax":1,"publisher":{"id":"example-outdoor.com","domain":"example-outdoor.com"}},"device":{"devicetype":8,"w":1920,"h":1080,"geo":{"lat":42.48723,"lon":-83.03313,"type":3}},"source":{"schain":{"complete":1,"ver":"1.0","nodes":[{"asi":"reseller.example","sid":"r-1","hp":1},{"asi":"ssp-b.example","sid":"rs-77","hp":1}]}}}\n{"id":"req-0008","imp":[{"id":"1","bidfloor":9,"bidfloorcur":"USD","banner":{"w":1080,"h":1920},"dt":1796137200000,"qty":{"multiplier":4,"sourcetype":1,"vendor":"measurement.example"}}],"dooh":{"id":"A-9001","name":"DTW McNamara Gate A36","venuetype":["transit.airports.gates"],"venuetypetax":1,"publisher":{"id":"metro-screens.example","domain":"metro-screens.example"}},"device":{"devicetype":8,"w":1080,"h":1920,"geo":{"lat":42.21242,"lon":-83.35341,"type":3}},"source":{"schain":{"complete":1,"ver":"1.0","nodes":[{"asi":"ssp-a.example","sid":"pub-12","hp":1}]}}}\n{"id":"req-0009","imp":[{"id":"1","bidfloor":9,"bidfloorcur":"USD","banner":{"w":1080,"h":1920},"dt":1796137200000,"qty":{"multiplier":4,"sourcetype":1,"vendor":"measurement.example"}}],"dooh":{"id":"B-5550","name":"Concourse Shops Display","venuetype":["retail.malls.concourse"],"venuetypetax":1,"publisher":{"id":"metro-screens.example","domain":"metro-screens.example"}},"device":{"devicetype":8,"w":1080,"h":1920,"geo":{"lat":42.21258,"lon":-83.35338,"type":3}},"source":{"schain":{"complete":1,"ver":"1.0","nodes":[{"asi":"ssp-b.example","sid":"b-pub-9","hp":1}]}}}\n{"id":"req-0010","imp":[{"id":"1","bidfloor":7,"bidfloorcur":"USD","banner":{"w":1080,"h":1920},"dt":1796137200000,"qty":{"multiplier":6,"sourcetype":1,"vendor":"measurement.example"}}],"dooh":{"id":"A-MALL-1","name":"Somerset Mall Concourse North","venuetype":["retail.malls.concourse"],"venuetypetax":1,"publisher":{"id":"metro-screens.example","domain":"metro-screens.example"}},"device":{"devicetype":8,"w":1080,"h":1920,"geo":{"lat":42.56241,"lon":-83.18402,"type":3}},"source":{"schain":{"complete":1,"ver":"1.0","nodes":[{"asi":"ssp-a.example","sid":"pub-12","hp":1}]}}}\n{"id":"req-0011","imp":[{"id":"1","bidfloor":7,"bidfloorcur":"USD","banner":{"w":1080,"h":1920},"dt":1796137200000,"qty":{"multiplier":6,"sourcetype":1,"vendor":"measurement.example"}}],"dooh":{"id":"A-MALL-2","name":"Somerset Mall Concourse South","venuetype":["retail.malls.concourse"],"venuetypetax":1,"publisher":{"id":"metro-screens.example","domain":"metro-screens.example"}},"device":{"devicetype":8,"w":1080,"h":1920,"geo":{"lat":42.56241,"lon":-83.18402,"type":3}},"source":{"schain":{"complete":1,"ver":"1.0","nodes":[{"asi":"ssp-a.example","sid":"pub-12","hp":1}]}}}\n{"ssp":"ssp-b.example","request":{"id":"req-0012","imp":[{"id":"1","bidfloor":7.5,"bidfloorcur":"USD","banner":{"w":1080,"h":1920},"dt":1796137200000,"qty":{"multiplier":6,"sourcetype":1,"vendor":"measurement.example"}}],"dooh":{"id":"B-MALL-X","name":"Somerset Mall Concourse North","venuetype":["20501"],"venuetypetax":1,"publisher":{"id":"metro-screens.example","domain":"metro-screens.example"}},"device":{"devicetype":8,"w":1080,"h":1920,"geo":{"lat":42.56243,"lon":-83.18401,"type":3}}}}\n{"ssp":"ssp-c.example","request":{"id":"req-0013","imp":[{"id":"1","bidfloor":10,"bidfloorcur":"USD","banner":{"w":1080,"h":1920},"dt":1796137200000,"qty":{"multiplier":2,"sourcetype":1,"vendor":"measurement.example"}}],"dooh":{"id":"C-7781","name":"Royal Oak Gym Lobby","venuetype":["health_beauty.gyms.lobby"],"venuetypetax":1,"publisher":{"id":"fit-screens.example","domain":"fit-screens.example"}},"device":{"devicetype":8,"w":1080,"h":1920,"geo":{"lat":42.48946,"lon":-83.14462,"type":3}}}}\n{"id":"req-0014","imp":[{"id":"1","bidfloor":6,"bidfloorcur":"USD","banner":{"w":1080,"h":1920},"dt":1796137200000,"qty":{"multiplier":12,"sourcetype":1,"vendor":"measurement.example"}}],"dooh":{"id":"B-12000","name":"Woodward Ave Northbound Digital","venuetype":["outdoor.billboards.roadside"],"venuetypetax":1,"publisher":{"id":"example-outdoor.com","domain":"example-outdoor.com"}},"device":{"devicetype":8,"w":1080,"h":1920,"geo":{"lat":42.33143,"lon":-83.04575,"type":3}},"source":{"schain":{"complete":1,"ver":"1.0","nodes":[{"asi":"ssp-b.example","sid":"b-pub-1","hp":1}]}}}\n{"id":"web-1","site":{"page":"https://example.com"},"imp":[{"id":"1","banner":{"w":300,"h":250}}]}\n';
 
 // fixtures/valid/banner-roadside.json
 var banner_roadside_default = {
@@ -1519,3 +1801,123 @@ input.addEventListener("keydown", (e) => {
 });
 optNow.addEventListener("change", () => input.value.trim() && run());
 optMult.addEventListener("change", () => input.value.trim() && run());
+var tabs = [$("tab-check"), $("tab-screens")];
+function selectTab(tab) {
+  for (const t of tabs) {
+    const on = t === tab;
+    t.setAttribute("aria-selected", String(on));
+    t.tabIndex = on ? 0 : -1;
+    $(t.getAttribute("aria-controls")).hidden = !on;
+  }
+  history.replaceState(null, "", tab.id === "tab-screens" ? "#screens" : location.pathname + location.search);
+}
+tabs.forEach((t, i) => {
+  t.addEventListener("click", () => selectTab(t));
+  t.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    const next = tabs[(i + (e.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length];
+    selectTab(next);
+    next.focus();
+  });
+});
+if (location.hash === "#screens") selectTab(tabs[1]);
+var sInput = $("s-input");
+var sReport = $("s-report");
+var sRadius = $("s-radius");
+var sScore = $("s-score");
+var fmt = (n, digits = 4) => n === void 0 ? "–" : n.toFixed(digits);
+function pathCell(l) {
+  const p = l.paths[0];
+  if (!p || p.hops === 0) return `<span class="route">no schain</span>`;
+  const state = p.complete === 1 ? "complete" : `<strong style="color:var(--error)">incomplete</strong>`;
+  const route = p.nodes.map((n) => `<span class="hop">${esc(n.asi)}</span>`).join(" → ");
+  return `<span class="route">${route}</span><br><small>${p.hops} hop${p.hops === 1 ? "" : "s"}, ${state}</small>`;
+}
+function renderCluster(c) {
+  const w = c.weakestMatch;
+  const first = c.listings[0];
+  const why = [`within ${Math.round(w.distanceM)} m`, `size ${w.size}`, `venue ${w.venue}`, w.publisher ? "same publisher domain" : "", w.name ? "similar name" : ""].filter(Boolean).join(" \xB7 ");
+  return `
+    <div class="cluster">
+      <div class="cluster-head">
+        <h4>${esc(first.name ?? first.screenId)}</h4>
+        <span class="conf ${c.confidence}">${c.confidence} confidence \xB7 score ${w.score}</span>
+        <span class="why">${esc(first.venue ?? "")}${first.venue ? " \xB7 " : ""}${esc(why)}</span>
+      </div>
+      <div class="scroll"><table>
+        <thead><tr><th>SSP</th><th>Screen ID</th><th class="num">Multiplier</th><th class="num">Floor CPM</th><th class="num">Cost per play</th><th>Supply path</th></tr></thead>
+        <tbody>${c.listings.map((l) => `
+          <tr class="${l.key === c.bestListing ? "best" : ""}">
+            <td>${l.key === c.bestListing ? "★ " : ""}${esc(l.ssp)}</td>
+            <td>${esc(l.screenId)}</td>
+            <td class="num">${l.multiplier ? esc(l.multiplier.median) : "–"}</td>
+            <td class="num">${l.floor ? `${esc(l.floor.median)} ${esc(l.floor.currency)}` : "–"}</td>
+            <td class="num">${fmt(l.costPerPlay)}</td>
+            <td>${pathCell(l)}</td>
+          </tr>`).join("")}
+        </tbody>
+      </table></div>
+      ${c.flags.length ? `<ul class="flags">${c.flags.map((f) => `<li>${esc(f)}</li>`).join("")}</ul>` : ""}
+    </div>`;
+}
+function runScreens() {
+  const { items, error } = parse(sInput.value);
+  if (error) {
+    sReport.innerHTML = `<div class="parse-error">${esc(error)}</div>`;
+    return;
+  }
+  if (items.length === 0) {
+    sReport.innerHTML = `<div class="empty">Nothing to analyze yet. Paste bid requests or load the sample batch.</div>`;
+    return;
+  }
+  const opts = {};
+  const radius = Number(sRadius.value);
+  if (Number.isFinite(radius) && radius > 0) opts.radiusM = radius;
+  const score = Number(sScore.value);
+  if (Number.isFinite(score) && score > 0) opts.minScore = score;
+  const r = analyzeScreens(items, opts);
+  const s = r.summary;
+  let html = `
+    <div class="cards">
+      <div class="card"><b>${s.requests}</b><span>requests</span></div>
+      <div class="card"><b>${s.listings}</b><span>listings (SSP \xD7 screen ID)</span></div>
+      <div class="card"><b>${s.screens}</b><span>physical screens (est.)</span></div>
+      <div class="card"><b>${s.duplicateClusters}</b><span>sold by 2+ SSPs</span></div>
+    </div>`;
+  if (s.skipped) html += `<p class="note">Skipped ${s.skipped} record${s.skipped === 1 ? "" : "s"} that ${s.skipped === 1 ? "is" : "are"} not a DOOH bid request.</p>`;
+  html += `<h3>By SSP</h3><div class="scroll"><table>
+    <thead><tr><th>SSP</th><th class="num">Listings</th><th class="num">Also sold elsewhere</th><th class="num">Avg hops</th><th class="num">Incomplete chains</th></tr></thead>
+    <tbody>${s.bySsp.map((b) => `<tr><td>${esc(b.ssp)}</td><td class="num">${b.listings}</td><td class="num">${b.duplicated}</td><td class="num">${b.avgHops ?? "–"}</td><td class="num">${b.incompleteChains}</td></tr>`).join("")}</tbody>
+  </table></div>`;
+  html += `<h3>Screens sold through more than one SSP</h3>`;
+  html += r.clusters.length ? r.clusters.map(renderCluster).join("") : `<div class="all-clear">No screen appears under more than one SSP in this batch.</div>`;
+  if (r.pathIssues.length) {
+    html += `<h3>Supply path issues</h3><ul class="issues">` + r.pathIssues.map((p) => `<li class="issue warning"><div class="issue-top"><span class="rule">${esc(p.listing)}</span><span>${esc(p.issue)}</span></div></li>`).join("") + `</ul>`;
+  }
+  html += `<p class="note">★ = best path for that screen: complete supply chain first, then fewest hops, then lowest cost per play at floor. Matching is an estimate: check high-value matches before acting on them.</p>`;
+  sReport.innerHTML = html;
+}
+$("s-sample").addEventListener("click", () => {
+  sInput.value = multi_ssp_default.trim();
+  runScreens();
+});
+$("s-file").addEventListener("change", async (e) => {
+  const f = e.target.files?.[0];
+  if (!f) return;
+  sInput.value = await f.text();
+  e.target.value = "";
+  runScreens();
+});
+$("s-run").addEventListener("click", runScreens);
+$("s-clear").addEventListener("click", () => {
+  sInput.value = "";
+  sReport.innerHTML = `<div class="empty">Paste bid requests from several SSPs, or load the sample batch, then press <strong>Find duplicates</strong>.</div>`;
+  sInput.focus();
+});
+sInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    runScreens();
+  }
+});
+for (const el of [sRadius, sScore]) el.addEventListener("change", () => sInput.value.trim() && runScreens());

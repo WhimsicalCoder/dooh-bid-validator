@@ -13,6 +13,7 @@ await build({
   format: "esm",
   target: "es2020",
   outfile: "docs/main.js",
+  loader: { ".jsonl": "text" },
 });
 copyFileSync("web/index.html", "docs/index.html");
 console.log("Built docs/index.html and docs/main.js");

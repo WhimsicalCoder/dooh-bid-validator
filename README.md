@@ -153,7 +153,6 @@ npm test
 
 ## Roadmap
 
-- Web page: paste a request and see the report, with all checks running in the browser
 - Per-SSP batch summaries (group by `source.schain` or a custom field)
 - Supply-path checks: match `dooh.publisher` and `source.schain` against sellers.json
 - Screen deduplication: find the same physical screen sold under different IDs across SSPs

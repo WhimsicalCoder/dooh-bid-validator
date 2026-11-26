@@ -1,8 +1,11 @@
 # dooh-bid-validator
 
-Check programmatic DOOH (digital out-of-home) bid requests from a **buyer's point of view**.
+Buyer-side tools for programmatic DOOH (digital out-of-home):
 
-**Try it in your browser:** https://whimsicalcoder.github.io/dooh-bid-validator/ (nothing you paste leaves your computer)
+1. **Check bid requests** from a buyer's point of view (`dooh-validate`).
+2. **Find the same screen sold through several SSPs** and compare their supply paths (`dooh-screens`).
+
+**Try both in your browser:** https://whimsicalcoder.github.io/dooh-bid-validator/ (nothing you paste leaves your computer)
 
 Most validators answer "does this parse?". This one answers "can a buyer actually trust and price this screen?": is the location there, is the venue type real, where does the impression multiplier come from, when will the ad play, and what will one play cost.
 
@@ -68,9 +71,52 @@ AUD-001   error            1   33.3%
 LOC-001   error            1   33.3%
 ```
 
+## Find the same screen across SSPs
+
+Media owners often sell one physical screen through several SSPs, each with its own screen ID. Buyers then bid against themselves and pay for extra hops. `dooh-screens` takes DOOH bid requests from several SSPs and:
+
+1. groups them into **listings**: one per SSP per screen ID (`dooh.id`, else `device.ifa`, else `dooh.name`);
+2. matches listings from different SSPs that describe the **same physical screen**, using distance, screen size, venue type, publisher domain and name;
+3. compares each SSP's **supply path** (`source.schain`), audience multiplier, floor and cost per play, and marks the best path.
+
+```
+$ node dist/src/screens-cli.js fixtures/screens/multi-ssp.jsonl
+
+15 requests → 12 listings → about 8 physical screens
+3 screens are sold through more than one SSP (58.3% of listings are duplicates). Skipped 1 non-DOOH or unreadable record.
+
+Screen 1: Woodward Ave Northbound Digital  [high confidence, score 100]
+  Match: within 4 m, size same, venue same, same publisher domain, similar name
+    SSP               Screen ID     Mult.   Floor       Cost/play       Path
+  ★ ssp-a.example     A-4471        12.5    6 USD       0.0750 USD      ssp-a.example (1 hop, complete)
+    ssp-b.example     B-99812       18      6.5 USD     0.1170 USD      reseller.example → ssp-b.example (2 hops, complete)
+    ssp-c.example     C-0042        12.5    5 USD       0.0625 USD      ssp-c.example (1 hop, INCOMPLETE)
+  ▲ Audience multiplier differs by 44% between SSPs (12.5 to 18) for what looks like the same screen.
+  ▲ Cost per play at floor differs by 87% depending on which SSP you buy through.
+  ▲ ssp-b.example adds 1 extra hop compared with ssp-a.example.
+  ...
+```
+
+(All data in `fixtures/screens/` is made up.)
+
+**How the SSP is identified:** a wrapper record `{"ssp": "...", "request": {...}}`, else the field you name with `--ssp-path` (e.g. `ext.exchange`), else the last node of `source.schain`.
+
+**How matching works:** two listings can only match if they are within the radius (default 50 m), have the same screen shape (a different shape usually means the other face of a billboard), and are in the same venue family (an airport screen is never merged with a mall screen). The score then adds points for closeness, exact size, exact venue, same publisher domain and a similar name. Listings scoring 60+ are merged, strongest matches first, and one screen never holds two listings from the same SSP, because an SSP is assumed to know its own screens. Scores of 85+ are **high confidence**.
+
+**Best path:** complete supply chain first, then fewest hops, then lowest cost per play at floor.
+
+| Option | What it does |
+| --- | --- |
+| `--radius <m>` | Max distance between listings of the same screen (default 50) |
+| `--min-score <n>` | Minimum match score to merge (default 60) |
+| `--ssp-path <path>` | Field in the request that names the SSP |
+| `--json` | Machine-readable output |
+
+Matching is an estimate. Check high-value matches before acting on them.
+
 ## Web page
 
-The page in `web/` uses the same library and runs entirely in the browser. Build it with:
+The page in `web/` has both tools as tabs ("Check requests" and "Screens across SSPs"), uses the same library and runs entirely in the browser. Build it with:
 
 ```bash
 npm run build:web   # writes docs/index.html and docs/main.js
@@ -81,13 +127,18 @@ GitHub Pages serves the `docs/` folder. After changing the rules or the page, ru
 ## Use as a library
 
 ```ts
-import { validate } from "dooh-bid-validator";
+import { validate, analyzeScreens } from "dooh-bid-validator";
 
 const report = validate(bidRequest, { now: Date.now() });
 report.valid;     // false if any error
 report.score;     // 0-100
 report.issues;    // [{ ruleId, severity, message, path, ref }]
 report.metrics;   // per-imp multiplier, floor and cost per play
+
+const screens = analyzeScreens(bidRequests, { radiusM: 50 });
+screens.summary;    // requests, listings, estimated screens, duplicates, per-SSP stats
+screens.clusters;   // each screen sold by 2+ SSPs, with listings, best path and flags
+screens.pathIssues; // incomplete or missing supply chains, long paths
 ```
 
 ## Scoring
@@ -143,6 +194,7 @@ Start at 100. Each error costs 25 points, each warning 8. Info costs nothing. Mi
 
 - `fixtures/valid/`: complete requests that score 100.
 - `fixtures/invalid/`: one problem per file. `expected.json` lists the rules each file must trigger.
+- `fixtures/screens/multi-ssp.jsonl`: made-up requests from three SSPs covering the tricky cases (other face of a billboard, neighbouring mall screens, same name in another city). Regenerate with `node scripts/make-screens-fixture.mjs`.
 - `fixtures/upstream/`: real sample requests from Prebid Server's test suite and the IAB OpenRTB 2.6 guide. The Prebid files are minimal test requests built to exercise Prebid Server, not production traffic, so low scores there are expected.
 
 All requests in `fixtures/valid` and `fixtures/invalid` are made up. Never add real bid logs to this repo.
@@ -153,10 +205,9 @@ npm test
 
 ## Roadmap
 
-- Per-SSP batch summaries (group by `source.schain` or a custom field)
-- Supply-path checks: match `dooh.publisher` and `source.schain` against sellers.json
-- Screen deduplication: find the same physical screen sold under different IDs across SSPs
+- sellers.json lookups: confirm each `source.schain` node and flag resellers (command line only, since browsers block these requests)
 - Multiplier consistency over time for each screen
+- Export duplicate screens as a CSV for a buying team's block or allow lists
 
 ## License
 

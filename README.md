@@ -150,5 +150,3 @@ npm test
 ## License
 
 Apache 2.0, © 2026 WhimsicalCoder. See `LICENSE` and `NOTICE`.
-
-Built by [WhimsicalCoder](https://github.com/WhimsicalCoder), a programmatic trader.

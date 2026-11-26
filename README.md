@@ -2,6 +2,8 @@
 
 Check programmatic DOOH (digital out-of-home) bid requests from a **buyer's point of view**.
 
+**Try it in your browser:** https://whimsicalcoder.github.io/dooh-bid-validator/ (nothing you paste leaves your computer)
+
 Most validators answer "does this parse?". This one answers "can a buyer actually trust and price this screen?": is the location there, is the venue type real, where does the impression multiplier come from, when will the ad play, and what will one play cost.
 
 It follows OpenRTB 2.6, the IAB Tech Lab DOOH implementation guidance (§7.9), AdCOM 1.0 lists and the OpenOOH venue taxonomy. Every issue says which document it comes from, and rules that are buyer best practice rather than spec are labelled that way.
@@ -65,6 +67,16 @@ Rule      Severity  Requests  Share
 AUD-001   error            1   33.3%
 LOC-001   error            1   33.3%
 ```
+
+## Web page
+
+The page in `web/` uses the same library and runs entirely in the browser. Build it with:
+
+```bash
+npm run build:web   # writes docs/index.html and docs/main.js
+```
+
+GitHub Pages serves the `docs/` folder. After changing the rules or the page, run `npm run build:web` and commit `docs/` so the live page stays in sync.
 
 ## Use as a library
 

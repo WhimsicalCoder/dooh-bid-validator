@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DOOH Bid Request Validator</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect x=%274%27 y=%276%27 width=%2724%27 height=%2716%27 rx=%272%27 fill=%27%231d5c63%27/%3E%3Crect x=%2714%27 y=%2722%27 width=%274%27 height=%276%27 fill=%27%231d5c63%27/%3E%3C/svg%3E">
+<meta name="description" content="Check programmatic DOOH (OpenRTB 2.6) bid requests from a buyer's point of view: location, venue type, impression multiplier, play time and creative. Runs in your browser.">
+<style>
+  :root {
+    --bg: #f6f5f1;
+    --panel: #ffffff;
+    --ink: #1b1d21;
+    --muted: #63666e;
+    --line: #dddad2;
+    --accent: #1d5c63;
+    --accent-ink: #ffffff;
+    --error: #b42318;
+    --error-bg: #fdecea;
+    --warn: #8a5a00;
+    --warn-bg: #fff4d6;
+    --info: #3d5a80;
+    --info-bg: #e9eff7;
+    --ok: #1e7a46;
+    --ok-bg: #e5f4ea;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #15171a;
+      --panel: #1d2024;
+      --ink: #e8e6e1;
+      --muted: #9a9ca3;
+      --line: #30343a;
+      --accent: #5fb3ba;
+      --accent-ink: #0d1214;
+      --error: #ff8a80;
+      --error-bg: #3a1f1d;
+      --warn: #f4c46a;
+      --warn-bg: #3a3020;
+      --info: #9fb9dc;
+      --info-bg: #1f2a38;
+      --ok: #7fd3a0;
+      --ok-bg: #1b3326;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--sans); }
+  a { color: var(--accent); }
+  header { max-width: 1240px; margin: 0 auto; padding: 28px 20px 8px; }
+  header h1 { margin: 0; font-size: 22px; letter-spacing: -0.01em; }
+  header p { margin: 6px 0 0; color: var(--muted); max-width: 760px; }
+  .privacy { display: inline-flex; gap: 6px; align-items: center; margin-top: 10px; font-size: 13px; color: var(--ok); background: var(--ok-bg); padding: 3px 10px; border-radius: 999px; }
+  main { max-width: 1240px; margin: 0 auto; padding: 16px 20px 40px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+  .panel-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  .panel-head h2 { margin: 0; font-size: 14px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  textarea { display: block; width: 100%; min-height: 520px; resize: vertical; border: 0; padding: 14px; background: transparent; color: var(--ink); font: 13px/1.5 var(--mono); outline: none; tab-size: 2; }
+  @media (max-width: 900px) { textarea { min-height: 300px; } }
+  select, button, .file-btn { font: inherit; font-size: 13px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 7px; padding: 6px 10px; cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  button:focus-visible, select:focus-visible, .file-btn:focus-within, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .file-btn input { display: none; }
+  .options { display: flex; flex-wrap: wrap; gap: 14px; padding: 10px 14px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+  .options label { display: inline-flex; gap: 6px; align-items: flex-start; }
+  .options label input[type=checkbox] { margin-top: 3px; }
+  .options input[type=number] { width: 80px; font: inherit; padding: 2px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); color: var(--ink); }
+  #report { padding: 14px; min-height: 200px; }
+  .empty { color: var(--muted); padding: 30px 6px; text-align: center; }
+  .summary { display: flex; gap: 16px; align-items: center; margin-bottom: 14px; }
+  .score { width: 74px; height: 74px; border-radius: 50%; display: grid; place-items: center; font: 700 24px/1 var(--sans); flex: none; border: 4px solid currentColor; }
+  .score small { display: block; font-size: 10px; font-weight: 500; text-align: center; color: var(--muted); }
+  .score.good { color: var(--ok); } .score.mid { color: var(--warn); } .score.bad { color: var(--error); }
+  .verdict { font-size: 18px; font-weight: 700; }
+  .verdict.valid { color: var(--ok); } .verdict.invalid { color: var(--error); }
+  .counts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+  .pill { font-size: 12px; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
+  .pill.error { color: var(--error); background: var(--error-bg); }
+  .pill.warning { color: var(--warn); background: var(--warn-bg); }
+  .pill.info { color: var(--info); background: var(--info-bg); }
+  .issues { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+  .issue { border-left: 4px solid; border-radius: 6px; padding: 9px 12px; }
+  .issue.error { border-color: var(--error); background: var(--error-bg); }
+  .issue.warning { border-color: var(--warn); background: var(--warn-bg); }
+  .issue.info { border-color: var(--info); background: var(--info-bg); }
+  .issue-top { display: flex; gap: 8px; align-items: baseline; }
+  .rule { font: 600 12px var(--mono); white-space: nowrap; }
+  .issue.error .rule { color: var(--error); } .issue.warning .rule { color: var(--warn); } .issue.info .rule { color: var(--info); }
+  .meta { margin-top: 4px; font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 14px; }
+  .meta code { font-family: var(--mono); }
+  .all-clear { background: var(--ok-bg); color: var(--ok); border-radius: 6px; padding: 10px 12px; font-weight: 600; }
+  h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 20px 0 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .parse-error { color: var(--error); background: var(--error-bg); border-radius: 6px; padding: 10px 12px; font: 13px/1.5 var(--mono); white-space: pre-wrap; }
+  details.req { border: 1px solid var(--line); border-radius: 8px; margin-top: 8px; }
+  details.req summary { cursor: pointer; padding: 8px 12px; display: flex; gap: 10px; align-items: center; }
+  details.req > div { padding: 0 12px 12px; }
+  .tag { font: 600 12px var(--mono); }
+  .tag.valid { color: var(--ok); } .tag.invalid { color: var(--error); }
+  footer { max-width: 1240px; margin: 0 auto; padding: 0 20px 40px; color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>DOOH Bid Request Validator</h1>
+  <p>Check programmatic DOOH bid requests (OpenRTB 2.6) from a buyer's point of view: screen location, venue type, impression multiplier, play time and creative. Each issue names the spec section it comes from.</p>
+  <span class="privacy">● Runs entirely in your browser. Nothing you paste is sent anywhere.</span>
+</header>
+
+<main>
+  <section class="panel" aria-label="Bid request input">
+    <div class="panel-head">
+      <h2>Bid request</h2>
+      <div class="controls">
+        <select id="sample" aria-label="Load a sample request">
+          <option value="">Load a sample…</option>
+        </select>
+        <label class="file-btn">Upload file<input id="file" type="file" accept=".json,.jsonl,.txt,application/json"></label>
+        <button id="clear" type="button">Clear</button>
+        <button id="run" class="primary" type="button">Validate</button>
+      </div>
+    </div>
+    <textarea id="input" spellcheck="false" aria-label="Paste a bid request as JSON" placeholder='Paste one OpenRTB 2.6 bid request as JSON, an array of requests, or one request per line (JSON Lines).
+
+{
+  "id": "...",
+  "dooh": { ... },
+  "device": { "geo": { "lat": ..., "lon": ... } },
+  "imp": [ { "qty": { "multiplier": ... }, ... } ]
+}'></textarea>
+    <div class="options">
+      <label><input id="opt-now" type="checkbox"> <span>Check play time (<code>imp.dt</code>) against the current time</span></label>
+      <label>Max multiplier <input id="opt-mult" type="number" min="1" value="10000"></label>
+    </div>
+  </section>
+
+  <section class="panel" aria-label="Report" aria-live="polite">
+    <div class="panel-head"><h2>Report</h2></div>
+    <div id="report"><div class="empty">Paste a bid request or load a sample, then press <strong>Validate</strong>.<br>Tip: <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Enter</kbd> also runs it.</div></div>
+  </section>
+</main>
+
+<footer>
+  Open source (Apache 2.0): <a href="https://github.com/WhimsicalCoder/dooh-bid-validator">github.com/WhimsicalCoder/dooh-bid-validator</a>.
+  Based on OpenRTB 2.6, the IAB Tech Lab DOOH implementation guide, AdCOM 1.0 and the OpenOOH venue taxonomy.
+</footer>
+
+<script type="module" src="main.js"></script>
+</body>
+</html>

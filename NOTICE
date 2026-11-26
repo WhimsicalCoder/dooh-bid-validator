@@ -1,0 +1,16 @@
+dooh-bid-validator
+Copyright 2026 WhimsicalCoder
+
+This product includes material from third parties:
+
+- src/data/venues.ts is generated from the OpenOOH Venue Taxonomy
+  (https://github.com/openooh/venue-taxonomy), licensed under the Apache License 2.0.
+
+- fixtures/upstream/prebid-server-*.json are copied unchanged from Prebid Server
+  (https://github.com/prebid/prebid-server), Copyright Prebid.org, Inc.,
+  licensed under the Apache License 2.0.
+
+- fixtures/upstream/iab-ortb26-example-*.json are the DOOH example bid requests from
+  the OpenRTB 2.6 Implementation Guide, section 7.9.6
+  (https://github.com/InteractiveAdvertisingBureau/openrtb2.x), by IAB Technology Laboratory,
+  licensed under the Creative Commons Attribution 3.0 License.

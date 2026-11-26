@@ -1,0 +1,20 @@
+/** Short references to the documents each rule is based on. */
+export const REF = {
+  ortbRequest: "OpenRTB 2.6 §3.2.1 (BidRequest)",
+  ortbImp: "OpenRTB 2.6 §3.2.4 (Imp)",
+  ortbBanner: "OpenRTB 2.6 §3.2.6 (Banner)",
+  ortbVideo: "OpenRTB 2.6 §3.2.7 (Video)",
+  ortbDevice: "OpenRTB 2.6 §3.2.18 (Device)",
+  ortbGeo: "OpenRTB 2.6 §3.2.19 (Geo)",
+  ortbQty: "OpenRTB 2.6 §3.2.31 (Qty)",
+  ortbDooh: "OpenRTB 2.6 §3.2.32 (DOOH)",
+  implDevice: "OpenRTB 2.6 Implementation §7.9.2.5 (DOOH device attributes)",
+  implLeadTime: "OpenRTB 2.6 Implementation §7.9.2.3 (lead time up to 1-2 hours)",
+  implMultiplier: "OpenRTB 2.6 Implementation §7.9.1 (multiple/variable impressions)",
+  adcomSourceTypes: "AdCOM 1.0 List: DOOH Multiplier Measurement Source Types",
+  adcomVenueTax: "AdCOM 1.0 List: DOOH Venue Taxonomies",
+  adcomDeviceTypes: "AdCOM 1.0 List: Device Types (8 = OOH device)",
+  openooh: "OpenOOH Venue Taxonomy (github.com/openooh/venue-taxonomy)",
+  openoohTiers: "OpenOOH Venue Taxonomy: screens should not be assigned only a parent venue type",
+  buyer: "Buyer best practice (not a spec requirement)",
+} as const;

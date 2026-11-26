@@ -6,9 +6,11 @@ import { structure } from "./rules/structure.js";
 import { timing } from "./rules/timing.js";
 import { venue } from "./rules/venue.js";
 import { ImpMetrics, Issue, Report, Rule, RuleContext, Severity, ValidateOptions } from "./types.js";
-import { imps, isNum, isObj } from "./util.js";
+import { imps, isNum, isObj, unwrap } from "./util.js";
 
 export * from "./types.js";
+export * from "./screens.js";
+export { unwrap };
 
 export const RULES: Record<string, Rule> = { structure, location, venue, legacy, audience, timing, creative };
 
@@ -19,15 +21,6 @@ const DEFAULTS = {
 };
 
 const SEVERITY_ORDER: Record<Severity, number> = { error: 0, warning: 1, info: 2 };
-
-/**
- * Accepts a plain OpenRTB bid request, or a Prebid Server test file
- * (which wraps the request in "mockBidRequest").
- */
-export function unwrap(input: any): any {
-  if (isObj(input) && isObj(input.mockBidRequest)) return input.mockBidRequest;
-  return input;
-}
 
 export function validate(input: unknown, opts: ValidateOptions = {}): Report {
   const req = unwrap(input);

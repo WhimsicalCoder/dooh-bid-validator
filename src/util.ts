@@ -15,3 +15,12 @@ export const decimals = (n: number): number => {
   const i = s.indexOf(".");
   return i === -1 ? 0 : s.length - i - 1;
 };
+
+/**
+ * Accepts a plain OpenRTB bid request, or a Prebid Server test file
+ * (which wraps the request in "mockBidRequest").
+ */
+export function unwrap(input: any): any {
+  if (isObj(input) && isObj(input.mockBidRequest)) return input.mockBidRequest;
+  return input;
+}

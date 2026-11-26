@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { formatReport, formatSummary, summarize } from "./format.js";
 import { Report, validate, ValidateOptions } from "./index.js";
+import { load } from "./io.js";
 
 const HELP = `dooh-validate - check DOOH OpenRTB 2.6 bid requests from a buyer's point of view
 
@@ -32,27 +32,6 @@ function parseNow(v: string): number {
   const t = Date.parse(v);
   if (Number.isNaN(t)) throw new Error(`--now: cannot read "${v}" as a time`);
   return t;
-}
-
-function load(path: string): Array<{ label: string; data: unknown }> {
-  const text = readFileSync(path === "-" ? 0 : path, "utf8").trim();
-  const name = path === "-" ? "stdin" : path;
-  if (text === "") return [];
-  try {
-    const data = JSON.parse(text);
-    if (Array.isArray(data)) return data.map((d, i) => ({ label: `${name}[${i}]`, data: d }));
-    return [{ label: name, data }];
-  } catch {
-    // Not one JSON document: treat as JSON Lines.
-    return text.split(/\r?\n/).flatMap((line, i) => {
-      if (line.trim() === "") return [];
-      try {
-        return [{ label: `${name}:${i + 1}`, data: JSON.parse(line) }];
-      } catch {
-        return [{ label: `${name}:${i + 1}`, data: undefined }];
-      }
-    });
-  }
 }
 
 function main(): number {
